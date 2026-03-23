@@ -1,11 +1,16 @@
 from django.urls import path
 from .views import check_attendance
 from .views import export_csv
+from .views import admin_login
+from .views import home
 from .views import get_attendance
+from .views import CustomTokenObtainPairView
 
 urlpatterns = [
-    # path('', home),
+    path('', home),
     path('check-attendance/', check_attendance),
     path('get-attendance/', get_attendance),
     path('export/', export_csv),
+    # path('login/', admin_login),
+    path('login/', CustomTokenObtainPairView.as_view(), name='login'),
 ]

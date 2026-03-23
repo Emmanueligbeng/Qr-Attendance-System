@@ -41,3 +41,6 @@ class Attendance(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
     timestamp = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=10)
+
+    class Meta:
+        unique_together = ('student', 'course')
