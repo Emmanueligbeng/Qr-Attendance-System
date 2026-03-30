@@ -4,7 +4,7 @@ from rest_framework.response import Response
 
 from rest_framework_simplejwt.views import TokenObtainPairView  # ✅ FIX ADDED
 from .serializers import CustomTokenObtainPairSerializer
-from attendance.serializers import CustomTokenObtainPairSerializer
+#from attendance.serializers import CustomTokenObtainPairSerializer
 from .models import Student, Course, Registration, Attendance
 import csv
 from django.contrib.auth import authenticate
