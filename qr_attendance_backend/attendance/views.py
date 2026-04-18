@@ -1,17 +1,21 @@
-from rest_framework.decorators import api_view
 from django.http import HttpResponse
-from rest_framework.response import Response
-from .serializers import StudentSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView  # ✅ FIX ADDED
-from .serializers import CustomTokenObtainPairSerializer
-#from attendance.serializers import CustomTokenObtainPairSerializer
-from .models import Student, Course, Registration, Attendance
-import csv
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import permission_classes
+from rest_framework.response import Response
+from django.contrib.auth import authenticate
 
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from openpyxl import Workbook
+
+from .models import Student, Course, Registration, Attendance
+from .serializers import StudentSerializer, CustomTokenObtainPairSerializer
+
+
+# ==========================
+# AUTH
+# ==========================
 
 @api_view(['POST'])
 def admin_login(request):
@@ -37,83 +41,83 @@ def admin_login(request):
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
+
 def home(request):
     return HttpResponse("QR Attendance Backend is Running ✅")
+
+
+# ==========================
+# ATTENDANCE CHECK
+# ==========================
+
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def check_attendance(request):
-    try:
-        matric = request.data.get("matric_number")
-        course_code = request.data.get("course_code")
+    matric = request.data.get("matric_number")
+    course_code = request.data.get("course_code")
 
-        # ✅ Validate input
-        if not matric or not course_code:
-            return Response({
-                "status": "denied",
-                "reason": "Missing required fields"
-            })
-
-        # 1. Check student
-        try:
-            student = Student.objects.get(matric_number=matric)
-        except Student.DoesNotExist:
-            return Response({
-                "status": "denied",
-                "reason": "Student not found"
-            })
-
-        # 2. Check course
-        try:
-            course = Course.objects.get(course_code=course_code)
-        except Course.DoesNotExist:
-            return Response({
-                "status": "denied",
-                "reason": "Invalid course"
-            })
-
-        # 3. Check registration
-        is_registered = Registration.objects.filter(
-            student=student,
-            course=course
-        ).exists()
-
-        if not is_registered:
-            return Response({
-                "status": "denied",
-                "reason": "Not registered for this course",
-                "student": get_student_data(student)
-            })
-
-        # 4. Prevent duplicate (stronger check)
-        if Attendance.objects.filter(student=student, course=course).exists():
-            return Response({
-                "status": "denied",
-                "reason": "Already checked in",
-                "student": get_student_data(student)
-            })
-
-        # 5. Save attendance
-        Attendance.objects.create(
-            student=student,
-            course=course,
-            status="granted"
-        )
-
+    if not matric or not course_code:
         return Response({
-            "status": "granted",
-            "reason": "Access granted",
+            "status": "denied",
+            "reason": "Missing required fields"
+        }, status=400)
+
+    # Check student
+    student = Student.objects.filter(matric_number=matric).first()
+    if not student:
+        return Response({
+            "status": "denied",
+            "reason": "Student not found"
+        }, status=404)
+
+    # Check course
+    course = Course.objects.filter(course_code=course_code).first()
+    if not course:
+        return Response({
+            "status": "denied",
+            "reason": "Invalid course"
+        }, status=404)
+
+    # Check registration
+    is_registered = Registration.objects.filter(
+        student=student,
+        course=course
+    ).exists()
+
+    if not is_registered:
+        return Response({
+            "status": "denied",
+            "reason": "Not registered for this course",
             "student": get_student_data(student)
-        })
+        }, status=403)
 
-    except Exception as e:
+    # Prevent duplicate (safe handling)
+    attendance, created = Attendance.objects.get_or_create(
+        student=student,
+        course=course,
+        defaults={"status": "granted"}
+    )
+
+    if not created:
         return Response({
-            "status": "error",
-            "reason": "Server error",
-            "debug": str(e)  # remove in production
-        })
-    
+            "status": "denied",
+            "reason": "Already checked in",
+            "student": get_student_data(student)
+        }, status=409)
+
+    return Response({
+        "status": "granted",
+        "reason": "Access granted",
+        "student": get_student_data(student)
+    })
+
+
+# ==========================
+# HELPER FUNCTION
+# ==========================
 
 def get_student_data(student):
-    courses = Registration.objects.filter(student=student).select_related('course')
+    courses = student.registration_set.select_related('course').all()
 
     return {
         "name": student.name,
@@ -124,45 +128,60 @@ def get_student_data(student):
         "courses": [c.course.course_code for c in courses]
     }
 
+
+# ==========================
+# GET ATTENDANCE (OPTIMIZED)
+# ==========================
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_attendance(request):
-    students = Student.objects.all().prefetch_related('registration_set__course')
+    students = Student.objects.prefetch_related(
+        'registration_set__course',
+        'attendance_set__course'
+    )
 
     data = []
 
     for student in students:
-        courses = Registration.objects.filter(student=student).select_related('course')
+        registrations = student.registration_set.all()
+        attendance_records = {
+            att.course_id: att for att in student.attendance_set.all()
+        }
 
-        attendance_records = Attendance.objects.filter(student=student)
-
-        for course in courses:
-            record = attendance_records.filter(course=course.course).first()
+        for reg in registrations:
+            record = attendance_records.get(reg.course.id)
 
             data.append({
                 "name": student.name,
                 "matric_number": student.matric_number,
                 "department": student.department,
-                "course": course.course.course_code,
-                "status": record.status if record else "absent",  # 🔥 KEY FIX
+                "course": reg.course.course_code,
+                "status": record.status if record else "absent",
                 "time": record.timestamp.strftime("%Y-%m-%d %H:%M:%S") if record else None
             })
 
     return Response(data)
 
+
+# ==========================
+# EXPORT EXCEL
+# ==========================
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def export_csv(request):
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="attendance.csv"'
+def export_excel(request):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Attendance"
 
-    writer = csv.writer(response)
-    writer.writerow(['Name', 'Matric', 'Department', 'Course', 'Time', 'Status'])
+    headers = ['Name', 'Matric', 'Department', 'Course', 'Time', 'Status']
+    ws.append(headers)
 
     records = Attendance.objects.select_related('student', 'course').all()
 
     for record in records:
-        writer.writerow([
+        ws.append([
             record.student.name,
             record.student.matric_number,
             record.student.department,
@@ -171,9 +190,22 @@ def export_csv(request):
             record.status
         ])
 
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename=attendance.xlsx'
+
+    wb.save(response)
+
     return response
 
+
+# ==========================
+# REGISTER STUDENT
+# ==========================
+
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])  # 🔒 Protect this
 def register_student(request):
     serializer = StudentSerializer(data=request.data)
 
@@ -182,6 +214,6 @@ def register_student(request):
         return Response({
             "message": "Student registered",
             "data": StudentSerializer(student).data
-        })
+        }, status=201)
 
     return Response(serializer.errors, status=400)
