@@ -1,7 +1,7 @@
 from rest_framework.decorators import api_view
 from django.http import HttpResponse
 from rest_framework.response import Response
-
+from .serializers import StudentSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView  # ✅ FIX ADDED
 from .serializers import CustomTokenObtainPairSerializer
 #from attendance.serializers import CustomTokenObtainPairSerializer
@@ -127,20 +127,26 @@ def get_student_data(student):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_attendance(request):
-    records = Attendance.objects.select_related('student', 'course')\
-        .all().order_by('-timestamp')[:100]  # limit for performance
+    students = Student.objects.all().prefetch_related('registration_set__course')
 
-    data = [
-        {
-            "name": r.student.name,
-            "matric_number": r.student.matric_number,
-            "department": r.student.department,
-            "course": r.course.course_code,
-            "time": r.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "status": r.status
-        }
-        for r in records
-    ]
+    data = []
+
+    for student in students:
+        courses = Registration.objects.filter(student=student).select_related('course')
+
+        attendance_records = Attendance.objects.filter(student=student)
+
+        for course in courses:
+            record = attendance_records.filter(course=course.course).first()
+
+            data.append({
+                "name": student.name,
+                "matric_number": student.matric_number,
+                "department": student.department,
+                "course": course.course.course_code,
+                "status": record.status if record else "absent",  # 🔥 KEY FIX
+                "time": record.timestamp.strftime("%Y-%m-%d %H:%M:%S") if record else None
+            })
 
     return Response(data)
 
@@ -166,3 +172,16 @@ def export_csv(request):
         ])
 
     return response
+
+@api_view(["POST"])
+def register_student(request):
+    serializer = StudentSerializer(data=request.data)
+
+    if serializer.is_valid():
+        student = serializer.save()
+        return Response({
+            "message": "Student registered",
+            "data": StudentSerializer(student).data
+        })
+
+    return Response(serializer.errors, status=400)

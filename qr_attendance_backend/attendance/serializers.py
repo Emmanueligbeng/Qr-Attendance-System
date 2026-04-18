@@ -1,4 +1,8 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+# serializers.py
+from rest_framework import serializers
+from .models import Student
+
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -11,3 +15,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["is_staff"] = user.is_staff
 
         return token
+    
+class StudentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Student
+        fields = "__all__"

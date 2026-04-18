@@ -5,6 +5,7 @@ from .views import admin_login
 from .views import home
 from .views import get_attendance
 from .views import CustomTokenObtainPairView
+# from .views import register_student
 
 urlpatterns = [
     path('', home),
@@ -13,4 +14,5 @@ urlpatterns = [
     path('export/', export_csv),
     # path('login/', admin_login),
     path('login/', CustomTokenObtainPairView.as_view(), name='login'),
+    # path("register-student/", register_student),
 ]
