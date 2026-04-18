@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import check_attendance, export_excel
+from .views import check_attendance, export_excel, signup
 # from .views import export_csv
 from .views import admin_login
 from .views import home
@@ -15,5 +15,6 @@ urlpatterns = [
     # path('login/', admin_login),
     path('login/', CustomTokenObtainPairView.as_view(), name='login'),
     # path("register-student/", register_student),
+    path('signup/', signup),
     path('export/', export_excel),
 ]

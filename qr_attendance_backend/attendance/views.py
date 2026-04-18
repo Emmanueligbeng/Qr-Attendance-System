@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth import authenticate
-
+from django.contrib.auth.models import User
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -37,6 +37,23 @@ def admin_login(request):
         "refresh": str(refresh),
     })
 
+@api_view(['POST'])
+def signup(request):
+    username = request.data.get("username")
+    password = request.data.get("password")
+
+    if not username or not password:
+        return Response({"error": "All fields required"}, status=400)
+
+    if User.objects.filter(username=username).exists():
+        return Response({"error": "Username already exists"}, status=400)
+
+    user = User.objects.create_user(
+        username=username,
+        password=password
+    )
+
+    return Response({"message": "User created successfully"})
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
